@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+/* ── Palette — CSS vars swap when html.dark is toggled ─────────── */
+
+:root {
+  /* Light mode */
+  --bg:            #faf9f7;
+  --surface:       #ffffff;
+  --surface-alt:   #f0ebe3;   /* icon wrapper backgrounds */
+  --surface-hover: #f5efe6;   /* card hover background */
+  --border:        #e8e2d9;
+  --border-hover:  #d4cdc4;
+  --text:          #1a1714;
+  --muted:         #7a7269;
+  --muted-dark:    #a89e95;   /* ultra-dim text (partners strip, footer credits) */
+  --accent:        #b8923d;   /* slightly darker gold so it reads on light bg */
+  --accent-hover:  #c9a96e;
+}
+
+html.dark {
+  /* Dark mode */
+  --bg:            #080808;
+  --surface:       #111111;
+  --surface-alt:   #1a1a1a;
+  --surface-hover: #141414;
+  --border:        #1f1f1f;
+  --border-hover:  #2a2520;
+  --text:          #ede8df;
+  --muted:         #6b635a;
+  --muted-dark:    #3d3830;
+  --accent:        #c9a96e;
+  --accent-hover:  #d4b87a;
+}
+
+/* ── Tailwind theme tokens — @theme inline means Tailwind uses    ─
+   the var() reference directly inside each utility class, so the
+   colour responds to theme changes at runtime.                    ─ */
+@theme inline {
+  --font-sans:           'Inter', system-ui, sans-serif;
+  --font-display:        'DM Serif Display', Georgia, serif;
+
+  --color-bg:            var(--bg);
+  --color-surface:       var(--surface);
+  --color-surface-alt:   var(--surface-alt);
+  --color-surface-hover: var(--surface-hover);
+  --color-border:        var(--border);
+  --color-border-hover:  var(--border-hover);
+  --color-text:          var(--text);
+  --color-muted:         var(--muted);
+  --color-muted-dark:    var(--muted-dark);
+  --color-accent:        var(--accent);
+  --color-accent-hover:  var(--accent-hover);
+}
+
+@layer base {
+  html {
+    font-size: 18px; /* bumps all rem-based sizes proportionally */
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+  body { margin: 0; }
+  * { box-sizing: border-box; }
+}
+
+/* Scrolling marquee for the partners strip */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Thin custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 3px; }

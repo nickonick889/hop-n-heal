@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hop & Heal — Medical Travel Concierge Singapore</title>
+    <meta name="description" content="Your medical travel concierge for Singapore. Medical care, accommodation, transport and activities — all in one place." />
+    <!-- DM Serif Display for hero headings, Inter for body -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- Sets dark/light class before React loads to prevent colour flash -->
+    <script>
+      document.documentElement.classList.add(
+        localStorage.getItem('theme') || 'dark'
+      );
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
