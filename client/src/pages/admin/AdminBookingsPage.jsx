@@ -17,10 +17,11 @@ export default function AdminBookingsPage() {
   const { data, loading } = useFetch(`/api/admin/bookings?_=${reload}`);
   const bookings = data?.bookings || [];
 
-  const [modal,  setModal]  = useState(null);
-  const [form,   setForm]   = useState({ status: '', notes: '', total_price: '' });
-  const [saving, setSaving] = useState(false);
-  const [err,    setErr]    = useState('');
+  const [modal,         setModal]         = useState(null);
+  const [form,          setForm]          = useState({ status: '', notes: '', total_price: '' });
+  const [saving,        setSaving]        = useState(false);
+  const [err,           setErr]           = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null); // booking id pending delete
 
   const [filter, setFilter] = useState('all');
 
@@ -41,6 +42,16 @@ export default function AdminBookingsPage() {
       setErr(e.response?.data?.error || 'Could not save.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await api.delete(`/api/admin/bookings/${id}`);
+      setConfirmDelete(null);
+      setReload(r => r + 1);
+    } catch {
+      setConfirmDelete(null);
     }
   };
 
@@ -97,7 +108,18 @@ export default function AdminBookingsPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <button onClick={() => openEdit(b)} className="text-xs text-accent hover:underline">Update</button>
+                    {confirmDelete === b.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-muted">Delete?</span>
+                        <button onClick={() => handleDelete(b.id)} className="text-xs text-red-400 hover:underline font-medium">Yes, delete</button>
+                        <button onClick={() => setConfirmDelete(null)} className="text-xs text-muted hover:text-text">Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-3">
+                        <button onClick={() => openEdit(b)} className="text-xs text-accent hover:underline">Update</button>
+                        <button onClick={() => setConfirmDelete(b.id)} className="text-xs text-muted hover:text-red-400 transition-colors">Delete</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

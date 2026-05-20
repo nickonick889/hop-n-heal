@@ -73,6 +73,25 @@ const BASE_QUESTIONS = [
     type: 'checkbox',
     options: ['None', 'Vegetarian', 'Vegan', 'Halal', 'Kosher', 'Gluten-free', 'Nut allergy'],
   },
+  {
+    id: 'food_cuisine',
+    title: 'Any cuisine preferences?',
+    subtitle: 'Singapore has it all — select what excites you, or say you\'re open to anything.',
+    type: 'checkbox',
+    options: [
+      'Open to anything',
+      'Local Singaporean (hawker food)',
+      'Chinese',
+      'Malay',
+      'Indian',
+      'Japanese',
+      'Korean',
+      'Western',
+      'Thai',
+      'Vietnamese',
+      'Italian / Mediterranean',
+    ],
+  },
 ];
 
 const ACCOUNT_QUESTION = {
@@ -98,7 +117,7 @@ export default function NewEnquiryPage() {
   const [answers, setAnswers] = useState({
     group_size: '', duration: '', budget: '', travel_dates: '',
     medical: [], accommodation: [], transport: [], activity: [],
-    food_budget: '', food_restrictions: [],
+    food_budget: '', food_restrictions: [], food_cuisine: [],
   });
 
   // Account fields (guests only)
@@ -145,17 +164,18 @@ export default function NewEnquiryPage() {
     }, 350);
   };
 
-  // Checkbox: toggle; "None" clears all others and vice versa
+  // Checkbox: toggle; "None" and "Open to anything" are exclusive — selecting one clears all others
+  const EXCLUSIVE = new Set(['None', 'Open to anything']);
   const handleCheckbox = (qId, opt) => {
     const current = answers[qId];
     let next;
-    if (opt === 'None') {
-      next = current.includes('None') ? [] : ['None'];
+    if (EXCLUSIVE.has(opt)) {
+      next = current.includes(opt) ? [] : [opt];
     } else {
-      const withoutNone = current.filter(o => o !== 'None');
-      next = withoutNone.includes(opt)
-        ? withoutNone.filter(o => o !== opt)
-        : [...withoutNone, opt];
+      const withoutExclusive = current.filter(o => !EXCLUSIVE.has(o));
+      next = withoutExclusive.includes(opt)
+        ? withoutExclusive.filter(o => o !== opt)
+        : [...withoutExclusive, opt];
     }
     setAnswers(a => ({ ...a, [qId]: next }));
   };
@@ -168,6 +188,7 @@ export default function NewEnquiryPage() {
     ...answers.transport.map(v         => ({ category: 'transport',        option_value: v })),
     ...answers.activity.map(v          => ({ category: 'activity',         option_value: v })),
     ...answers.food_restrictions.map(v => ({ category: 'food_restriction', option_value: v })),
+    ...answers.food_cuisine.map(v       => ({ category: 'food_cuisine',     option_value: v })),
   ];
 
   const handleLoggedInSubmit = async () => {
@@ -190,6 +211,8 @@ export default function NewEnquiryPage() {
   };
 
   const handleGuestSubmit = async () => {
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email.trim());
+    if (!emailOk) { setError('Please enter a valid email address.'); return; }
     if (account.password.length < 8) { setError('Password must be at least 8 characters.'); return; }
     setError(''); setLoading(true);
     try {

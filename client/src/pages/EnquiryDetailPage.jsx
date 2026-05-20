@@ -25,6 +25,7 @@ const CATEGORY_LABELS = {
   transport:        'Transport',
   activity:         'Activities',
   food_restriction: 'Dietary restrictions',
+  food_cuisine:     'Cuisine preferences',
 };
 
 export default function EnquiryDetailPage() {

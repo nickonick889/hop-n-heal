@@ -145,13 +145,16 @@ export default function AdminEnquiriesPage() {
             </div>
             <div className="px-6 py-5 space-y-4">
               {/* Read-only food info */}
-              {(modal.food_budget || (modal.food_restrictions && modal.food_restrictions.length > 0)) && (
+              {(modal.food_budget || modal.food_restrictions?.length > 0 || modal.food_cuisines?.length > 0) && (
                 <div className="bg-bg border border-border rounded-xl px-4 py-3 space-y-2">
                   {modal.food_budget && (
                     <p className="text-xs text-muted">Food budget: <span className="text-text font-medium">{modal.food_budget}</span></p>
                   )}
-                  {modal.food_restrictions && modal.food_restrictions.length > 0 && (
+                  {modal.food_restrictions?.length > 0 && (
                     <p className="text-xs text-muted">Dietary restrictions: <span className="text-text font-medium">{modal.food_restrictions.join(', ')}</span></p>
+                  )}
+                  {modal.food_cuisines?.length > 0 && (
+                    <p className="text-xs text-muted">Cuisine preferences: <span className="text-text font-medium">{modal.food_cuisines.join(', ')}</span></p>
                   )}
                 </div>
               )}

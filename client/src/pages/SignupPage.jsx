@@ -14,6 +14,11 @@ export default function SignupPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+    if (!emailOk) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     if (form.password.length < 8) {
       setError('Password must be at least 8 characters.');
       return;

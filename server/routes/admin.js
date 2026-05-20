@@ -54,10 +54,13 @@ router.post('/proposals/:id/items',             guard, adminController.addPropos
 router.put('/proposals/:id/items/:itemId',      guard, adminController.updateProposalItem);
 router.delete('/proposals/:id/items/:itemId',   guard, adminController.deleteProposalItem);
 router.post('/proposals/:id/convert',           guard, adminController.convertProposalToBooking);
+router.post('/proposals/:id/auto-populate',     guard, adminController.autoPopulateProposal);
+router.put('/proposals/:id/reorder',            guard, adminController.reorderProposalItems);
 
 // Bookings
-router.get('/bookings', guard, adminController.listBookings);
-router.put('/bookings/:id', guard, adminController.updateBooking);
+router.get('/bookings',        guard, adminController.listBookings);
+router.put('/bookings/:id',    guard, adminController.updateBooking);
+router.delete('/bookings/:id', guard, adminController.deleteBooking);
 
 // Admin users (super_admin only)
 router.get('/users', superOnly, adminController.listAdminUsers);

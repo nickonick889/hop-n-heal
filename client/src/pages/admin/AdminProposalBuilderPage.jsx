@@ -1,9 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Pencil, Trash2, X, Stethoscope,
-  BedDouble, Car, Sparkles, StickyNote, Check,
+  BedDouble, Car, Sparkles, StickyNote, Check, GripVertical,
 } from 'lucide-react';
+import {
+  DndContext, DragOverlay, closestCenter,
+  PointerSensor, useSensor, useSensors, useDroppable,
+} from '@dnd-kit/core';
+import {
+  SortableContext, useSortable, verticalListSortingStrategy, arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import api from '../../api/axios';
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -25,11 +33,11 @@ const STATUS_COLOURS = {
 };
 
 const ITEM_TYPES = [
-  { value: 'medical',       label: 'Medical',       icon: Stethoscope },
-  { value: 'accommodation', label: 'Accommodation',  icon: BedDouble   },
-  { value: 'transport',     label: 'Transport',      icon: Car         },
-  { value: 'activity',      label: 'Activity',       icon: Sparkles    },
-  { value: 'note',          label: 'Custom note',    icon: StickyNote  },
+  { value: 'medical',       label: 'Medical',      icon: Stethoscope },
+  { value: 'accommodation', label: 'Accommodation', icon: BedDouble   },
+  { value: 'transport',     label: 'Transport',     icon: Car         },
+  { value: 'activity',      label: 'Activity',      icon: Sparkles    },
+  { value: 'note',          label: 'Custom note',   icon: StickyNote  },
 ];
 
 const CATEGORY_LABELS = {
@@ -37,12 +45,83 @@ const CATEGORY_LABELS = {
   transport: 'Transport', activity: 'Activities', food_restriction: 'Dietary',
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────
 
 function ItemIcon({ type, size = 14 }) {
   const found = ITEM_TYPES.find(t => t.value === type);
   const Icon = found?.icon || StickyNote;
   return <Icon size={size} className="shrink-0" />;
+}
+
+// Rendered inside DragOverlay while dragging
+function ItemGhost({ item }) {
+  return (
+    <div className="flex items-center gap-3 px-5 py-3 bg-surface border border-accent/40 rounded-xl shadow-2xl">
+      <GripVertical size={14} className="text-muted shrink-0" />
+      <span className="text-muted shrink-0"><ItemIcon type={item.item_type} /></span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-text">{item.title}</p>
+      </div>
+      {item.price != null && (
+        <span className="text-sm font-medium text-accent shrink-0">SGD {Number(item.price).toLocaleString()}</span>
+      )}
+    </div>
+  );
+}
+
+// Each draggable item row
+function SortableRow({ item, onEdit, onDelete }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 }}
+      className="flex items-center gap-3 px-5 py-3"
+    >
+      <button
+        {...attributes} {...listeners}
+        className="text-border hover:text-muted cursor-grab active:cursor-grabbing touch-none shrink-0 rounded p-0.5"
+      >
+        <GripVertical size={14} />
+      </button>
+      <span className="text-muted shrink-0"><ItemIcon type={item.item_type} /></span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-text">{item.title}</p>
+        {item.description && <p className="text-xs text-muted mt-0.5 line-clamp-1">{item.description}</p>}
+      </div>
+      {item.price != null && (
+        <span className="text-sm font-medium text-accent shrink-0">SGD {Number(item.price).toLocaleString()}</span>
+      )}
+      <div className="flex gap-1 shrink-0">
+        <button onClick={() => onEdit(item)} className="p-1.5 text-muted hover:text-text transition-colors rounded-lg hover:bg-surface-alt">
+          <Pencil size={13} />
+        </button>
+        <button onClick={() => onDelete(item.id)} className="p-1.5 text-muted hover:text-red-400 transition-colors rounded-lg hover:bg-surface-alt">
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Drop zone for each day (handles empty-day drops)
+function DroppableDay({ dayId, children, isEmpty }) {
+  const { setNodeRef, isOver } = useDroppable({ id: dayId });
+  return (
+    <div ref={setNodeRef}>
+      {isEmpty ? (
+        <div className={`mx-4 my-3 rounded-xl border-2 border-dashed py-4 text-center text-sm transition-colors ${
+          isOver ? 'border-accent/50 bg-accent/5 text-accent' : 'border-border text-muted'
+        }`}>
+          {isOver ? 'Drop here' : 'Nothing planned yet.'}
+        </div>
+      ) : (
+        <div className={`divide-y divide-border transition-colors ${isOver ? 'bg-accent/5' : ''}`}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const inp = 'w-full bg-bg border border-border rounded-xl px-3 py-2.5 text-sm text-text placeholder:text-muted focus:outline-none focus:border-accent transition-colors';
@@ -53,35 +132,49 @@ export default function AdminProposalBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const [proposal,     setProposal]     = useState(null);
-  const [items,        setItems]        = useState([]);
-  const [form,         setForm]         = useState({ status: 'drafting', total_price: '', client_message: '', admin_notes: '' });
-  const [loading,      setLoading]      = useState(true);
-  const [saving,       setSaving]       = useState(false);
-  const [savedMsg,     setSavedMsg]     = useState('');
-  const [converting,   setConverting]   = useState(false);
+  const [proposal,       setProposal]       = useState(null);
+  const [items,          setItems]          = useState([]);
+  const [form,           setForm]           = useState({ status: 'drafting', total_price: '', client_message: '', admin_notes: '' });
+  const [loading,        setLoading]        = useState(true);
+  const [saving,         setSaving]         = useState(false);
+  const [savedMsg,       setSavedMsg]       = useState('');
+  const [converting,     setConverting]     = useState(false);
+  const [confirmConvert, setConfirmConvert] = useState(false);
+  const [activeItemId,   setActiveItemId]   = useState(null);
 
-  // Catalog fetched from public content endpoints
+  // Keep a sync ref so DnD callbacks always see the latest items without stale closures
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
   const [catalog, setCatalog] = useState({ services: [], stay: [], transport: [], activities: [] });
 
-  // Modal state
-  const [modal,     setModal]     = useState(null); // null | { mode:'add', day:N } | { mode:'edit', item:{} }
-  const [itemForm,  setItemForm]  = useState({ item_type: 'medical', title: '', description: '', price: '', day_number: 1 });
+  const [modal,      setModal]      = useState(null);
+  const [itemForm,   setItemForm]   = useState({ item_type: 'medical', title: '', description: '', price: '', day_number: 1 });
   const [itemSaving, setItemSaving] = useState(false);
 
-  // ─── Fetch proposal ────────────────────────────────────────────
+  // ─── Fetch + auto-populate if empty ───────────────────────────
 
   const fetchProposal = useCallback(async () => {
     try {
       const { data } = await api.get(`/api/admin/proposals/${id}`);
+      const fetched = data.proposal.items || [];
       setProposal(data.proposal);
-      setItems(data.proposal.items || []);
       setForm({
-        status:         data.proposal.status         || 'drafting',
-        total_price:    data.proposal.total_price     != null ? String(data.proposal.total_price) : '',
+        status:         data.proposal.status          || 'drafting',
+        total_price:    data.proposal.total_price != null ? String(data.proposal.total_price) : '',
         client_message: data.proposal.client_message  || '',
         admin_notes:    data.proposal.admin_notes     || '',
       });
+      if (fetched.length === 0) {
+        try {
+          const { data: pop } = await api.post(`/api/admin/proposals/${id}/auto-populate`);
+          setItems(pop.items || []);
+        } catch {
+          setItems([]);
+        }
+      } else {
+        setItems(fetched);
+      }
     } catch {
       navigate('/admin/proposals');
     } finally {
@@ -91,7 +184,6 @@ export default function AdminProposalBuilderPage() {
 
   useEffect(() => { fetchProposal(); }, [fetchProposal]);
 
-  // Fetch content catalog for item picker
   useEffect(() => {
     Promise.all([
       api.get('/api/services'),
@@ -99,12 +191,71 @@ export default function AdminProposalBuilderPage() {
       api.get('/api/transport'),
       api.get('/api/activities'),
     ]).then(([s, st, t, a]) => setCatalog({
-      services:    s.data.services        || [],
-      stay:        st.data.accommodations || [],
-      transport:   t.data.transport       || [],
-      activities:  a.data.activities      || [],
+      services:   s.data.services        || [],
+      stay:       st.data.accommodations || [],
+      transport:  t.data.transport       || [],
+      activities: a.data.activities      || [],
     })).catch(() => {});
   }, []);
+
+  // ─── DnD ──────────────────────────────────────────────────────
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragStart = useCallback(({ active }) => {
+    setActiveItemId(active.id);
+  }, []);
+
+  const handleDragEnd = useCallback(({ active, over }) => {
+    setActiveItemId(null);
+    if (!over || active.id === over.id) return;
+
+    const current    = itemsRef.current;
+    const activeItem = current.find(i => i.id === active.id);
+    if (!activeItem) return;
+
+    const overId = String(over.id);
+    const overItem  = overId.startsWith('day-') ? null : current.find(i => i.id === over.id);
+    const targetDay = overId.startsWith('day-') ? parseInt(overId.slice(4)) : overItem?.day_number;
+    if (!targetDay) return;
+
+    const sourceDay = activeItem.day_number;
+    let newItems;
+
+    if (targetDay === sourceDay && overItem) {
+      // Same-day reorder
+      const dayItems = current.filter(i => i.day_number === targetDay);
+      const oldIdx   = dayItems.findIndex(i => i.id === active.id);
+      const newIdx   = dayItems.findIndex(i => i.id === over.id);
+      if (oldIdx === -1 || newIdx === -1 || oldIdx === newIdx) return;
+      const reordered = arrayMove(dayItems, oldIdx, newIdx).map((it, idx) => ({ ...it, sort_order: idx }));
+      newItems = [...current.filter(i => i.day_number !== targetDay), ...reordered];
+    } else if (targetDay !== sourceDay) {
+      // Cross-day move — append to target day
+      const moved = current.map(it => it.id === active.id ? { ...it, day_number: targetDay } : it);
+      // Re-index sort_order for both affected days
+      newItems = moved.map(it => it);
+      [sourceDay, targetDay].forEach(day => {
+        const dayItems = newItems.filter(i => i.day_number === day).map((it, idx) => ({ ...it, sort_order: idx }));
+        newItems = [...newItems.filter(i => i.day_number !== day), ...dayItems];
+      });
+    } else {
+      return;
+    }
+
+    itemsRef.current = newItems;
+    setItems(newItems);
+
+    // Persist affected days (fire-and-forget)
+    const toUpdate = newItems
+      .filter(i => i.day_number === sourceDay || i.day_number === targetDay)
+      .map(({ id: iid, day_number, sort_order }) => ({ id: iid, day_number, sort_order: sort_order ?? 0 }));
+    if (toUpdate.length) {
+      api.put(`/api/admin/proposals/${id}/reorder`, { items: toUpdate }).catch(() => {});
+    }
+  }, [id]);
 
   // ─── Proposal save ─────────────────────────────────────────────
 
@@ -122,16 +273,11 @@ export default function AdminProposalBuilderPage() {
     }
   };
 
-  // ─── Convert to booking ────────────────────────────────────────
-
   const handleConvert = async () => {
-    if (!window.confirm('Convert this proposal to a confirmed booking? This will mark the enquiry as converted.')) return;
     setConverting(true);
     try {
-      const { data } = await api.post(`/api/admin/proposals/${id}/convert`);
-      navigate(`/admin/bookings`);
-      // brief flash before nav
-      void data;
+      await api.post(`/api/admin/proposals/${id}/convert`);
+      navigate('/admin/bookings');
     } finally {
       setConverting(false);
     }
@@ -139,30 +285,14 @@ export default function AdminProposalBuilderPage() {
 
   // ─── Item modal ────────────────────────────────────────────────
 
-  const openAdd = (day) => {
-    setItemForm({ item_type: 'medical', title: '', description: '', price: '', day_number: day });
-    setModal({ mode: 'add', day });
-  };
-
-  const openEdit = (item) => {
-    setItemForm({
-      item_type:   item.item_type,
-      title:       item.title,
-      description: item.description || '',
-      price:       item.price != null ? String(item.price) : '',
-      day_number:  item.day_number,
-    });
-    setModal({ mode: 'edit', item });
-  };
+  const openAdd  = (day)  => { setItemForm({ item_type: 'medical', title: '', description: '', price: '', day_number: day }); setModal({ mode: 'add', day }); };
+  const openEdit = (item) => { setItemForm({ item_type: item.item_type, title: item.title, description: item.description || '', price: item.price != null ? String(item.price) : '', day_number: item.day_number }); setModal({ mode: 'edit', item }); };
 
   const handleItemSave = async () => {
     if (!itemForm.title.trim()) return;
     setItemSaving(true);
     try {
-      const payload = {
-        ...itemForm,
-        price: itemForm.price ? Number(itemForm.price) : null,
-      };
+      const payload = { ...itemForm, price: itemForm.price ? Number(itemForm.price) : null };
       if (modal.mode === 'add') {
         const { data } = await api.post(`/api/admin/proposals/${id}/items`, payload);
         setItems(prev => [...prev, data.item]);
@@ -181,8 +311,6 @@ export default function AdminProposalBuilderPage() {
     setItems(prev => prev.filter(it => it.id !== itemId));
   };
 
-  // ─── Catalog selection helper ──────────────────────────────────
-
   const catalogForType = (type) => {
     if (type === 'medical')       return catalog.services.map(s  => ({ label: s.title,        price: s.price_from }));
     if (type === 'accommodation') return catalog.stay.map(s       => ({ label: s.name,         price: s.price_from }));
@@ -191,7 +319,7 @@ export default function AdminProposalBuilderPage() {
     return [];
   };
 
-  // ─── Derived values ────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -204,14 +332,16 @@ export default function AdminProposalBuilderPage() {
   const enquiry  = proposal?.enquiry;
   const numDays  = DURATION_DAYS[enquiry?.duration_days] || 7;
   const subtotal = items.reduce((sum, it) => sum + (Number(it.price) || 0), 0);
+  const activeItem = items.find(i => i.id === activeItemId);
 
-  const byDay = items.reduce((acc, it) => {
-    (acc[it.day_number] = acc[it.day_number] || []).push(it);
-    return acc;
-  }, {});
+  // Group by day, sorted by sort_order within each day
+  const byDay = {};
+  [...items]
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .forEach(it => { (byDay[it.day_number] = byDay[it.day_number] || []).push(it); });
 
   const interests = enquiry?.interests || [];
-  const grouped = interests.reduce((acc, i) => {
+  const grouped   = interests.reduce((acc, i) => {
     (acc[i.category] = acc[i.category] || []).push(i.option_value);
     return acc;
   }, {});
@@ -219,13 +349,11 @@ export default function AdminProposalBuilderPage() {
   return (
     <div className="p-8 max-w-4xl">
 
-      {/* Back */}
       <button onClick={() => navigate('/admin/proposals')}
         className="inline-flex items-center gap-2 text-sm text-muted hover:text-text transition-colors mb-6">
         <ArrowLeft size={15} /> Back to proposals
       </button>
 
-      {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap mb-8">
         <div>
           <h1 className="text-2xl font-semibold text-text" style={{ fontFamily: "'DM Serif Display', serif" }}>
@@ -250,58 +378,53 @@ export default function AdminProposalBuilderPage() {
         </div>
         {Object.keys(grouped).length > 0 && (
           <div className="flex flex-wrap gap-2 pt-3 border-t border-border">
-            {Object.entries(grouped).map(([cat, vals]) => (
+            {Object.entries(grouped).map(([cat, vals]) =>
               vals.map(v => (
                 <span key={`${cat}-${v}`} className="text-xs bg-surface-alt border border-border text-muted px-2.5 py-1 rounded-full">
                   {CATEGORY_LABELS[cat] ? `${CATEGORY_LABELS[cat]}: ` : ''}{v}
                 </span>
               ))
-            ))}
+            )}
           </div>
         )}
       </div>
 
       {/* ─── Day-by-day itinerary ─── */}
-      <div className="space-y-6 mb-10">
-        {Array.from({ length: numDays }, (_, i) => i + 1).map(day => (
-          <div key={day} className="bg-surface border border-border rounded-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-              <p className="text-sm font-semibold text-text">Day {day}</p>
-              <button onClick={() => openAdd(day)}
-                className="flex items-center gap-1.5 text-xs text-accent hover:bg-accent/10 px-3 py-1.5 rounded-full transition-colors border border-accent/30">
-                <Plus size={12} /> Add item
-              </button>
-            </div>
-
-            {(byDay[day] || []).length === 0 ? (
-              <p className="px-5 py-4 text-sm text-muted">Nothing planned yet.</p>
-            ) : (
-              <div className="divide-y divide-border">
-                {(byDay[day] || []).map(item => (
-                  <div key={item.id} className="flex items-start gap-3 px-5 py-3">
-                    <span className="text-muted mt-0.5"><ItemIcon type={item.item_type} /></span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-text">{item.title}</p>
-                      {item.description && <p className="text-xs text-muted mt-0.5 line-clamp-1">{item.description}</p>}
-                    </div>
-                    {item.price != null && (
-                      <span className="text-sm font-medium text-accent shrink-0">SGD {Number(item.price).toLocaleString()}</span>
-                    )}
-                    <div className="flex gap-1 shrink-0">
-                      <button onClick={() => openEdit(item)} className="p-1.5 text-muted hover:text-text transition-colors rounded-lg hover:bg-surface-alt">
-                        <Pencil size={13} />
-                      </button>
-                      <button onClick={() => handleItemDelete(item.id)} className="p-1.5 text-muted hover:text-red-400 transition-colors rounded-lg hover:bg-surface-alt">
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="space-y-6 mb-10">
+          {Array.from({ length: numDays }, (_, i) => i + 1).map(day => {
+            const dayId    = `day-${day}`;
+            const dayItems = byDay[day] || [];
+            return (
+              <div key={day} className="bg-surface border border-border rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+                  <p className="text-sm font-semibold text-text">Day {day}</p>
+                  <button onClick={() => openAdd(day)}
+                    className="flex items-center gap-1.5 text-xs text-accent hover:bg-accent/10 px-3 py-1.5 rounded-full transition-colors border border-accent/30">
+                    <Plus size={12} /> Add item
+                  </button>
+                </div>
+                <SortableContext items={dayItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                  <DroppableDay dayId={dayId} isEmpty={dayItems.length === 0}>
+                    {dayItems.map(item => (
+                      <SortableRow key={item.id} item={item} onEdit={openEdit} onDelete={handleItemDelete} />
+                    ))}
+                  </DroppableDay>
+                </SortableContext>
               </div>
-            )}
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+
+        <DragOverlay dropAnimation={null}>
+          {activeItem && <ItemGhost item={activeItem} />}
+        </DragOverlay>
+      </DndContext>
 
       {/* ─── Proposal details ─── */}
       <div className="bg-surface border border-border rounded-2xl p-6 space-y-5">
@@ -359,10 +482,24 @@ export default function AdminProposalBuilderPage() {
           </div>
 
           {(form.status === 'awaiting_payment' || form.status === 'confirmed') && (
-            <button onClick={handleConvert} disabled={converting}
-              className="border border-green-500/40 text-green-400 hover:bg-green-500/10 font-medium px-5 py-2.5 rounded-full text-sm transition-colors disabled:opacity-60">
-              {converting ? 'Converting…' : 'Convert to booking →'}
-            </button>
+            confirmConvert ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted">Confirm conversion?</span>
+                <button onClick={handleConvert} disabled={converting}
+                  className="bg-green-500 text-[#080808] font-semibold px-4 py-2 rounded-full text-sm hover:bg-green-400 disabled:opacity-60 transition-colors">
+                  {converting ? 'Converting…' : 'Yes, convert'}
+                </button>
+                <button onClick={() => setConfirmConvert(false)} disabled={converting}
+                  className="text-sm text-muted border border-border px-4 py-2 rounded-full hover:border-accent/50 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmConvert(true)}
+                className="border border-green-500/40 text-green-400 hover:bg-green-500/10 font-medium px-5 py-2.5 rounded-full text-sm transition-colors">
+                Convert to booking →
+              </button>
+            )
           )}
         </div>
       </div>
@@ -379,7 +516,6 @@ export default function AdminProposalBuilderPage() {
             </div>
 
             <div className="px-6 py-5 space-y-4">
-              {/* Type */}
               <div>
                 <label className="block text-xs text-muted mb-1.5">Type</label>
                 <div className="flex flex-wrap gap-2">
@@ -397,7 +533,6 @@ export default function AdminProposalBuilderPage() {
                 </div>
               </div>
 
-              {/* Catalog picker (not shown for 'note') */}
               {itemForm.item_type !== 'note' && catalogForType(itemForm.item_type).length > 0 && (
                 <div>
                   <label className="block text-xs text-muted mb-1.5">Pick from catalog <span className="text-muted-dark">(optional)</span></label>
@@ -416,7 +551,6 @@ export default function AdminProposalBuilderPage() {
                 </div>
               )}
 
-              {/* Day (only in edit mode so admin can move items) */}
               {modal.mode === 'edit' && (
                 <div>
                   <label className="block text-xs text-muted mb-1.5">Day</label>
@@ -430,7 +564,6 @@ export default function AdminProposalBuilderPage() {
                 </div>
               )}
 
-              {/* Title */}
               <div>
                 <label className="block text-xs text-muted mb-1.5">Title</label>
                 <input type="text" value={itemForm.title}
@@ -439,7 +572,6 @@ export default function AdminProposalBuilderPage() {
                   className={inp} />
               </div>
 
-              {/* Price */}
               <div>
                 <label className="block text-xs text-muted mb-1.5">Price (SGD) <span className="text-muted-dark">(optional)</span></label>
                 <input type="number" min="0" step="0.01" value={itemForm.price}
@@ -447,7 +579,6 @@ export default function AdminProposalBuilderPage() {
                   placeholder="0.00" className={inp} />
               </div>
 
-              {/* Description */}
               <div>
                 <label className="block text-xs text-muted mb-1.5">Notes <span className="text-muted-dark">(optional)</span></label>
                 <input type="text" value={itemForm.description}
