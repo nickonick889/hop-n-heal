@@ -6,7 +6,7 @@ const SALT_ROUNDS = 12;
 const COOKIE_OPTIONS = {
   httpOnly: true,   // JS in the browser cannot read this cookie — protects against XSS
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
+  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' required for cross-domain in prod
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
 };
 
@@ -16,6 +16,9 @@ async function signup(req, res, next) {
 
     if (!full_name || !email || !password) {
       return res.status(400).json({ error: 'full_name, email and password are required' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
 
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -78,7 +81,11 @@ async function login(req, res, next) {
 }
 
 function logout(req, res) {
-  res.clearCookie('token', { httpOnly: true, sameSite: 'lax' });
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  });
   res.json({ message: 'Logged out' });
 }
 

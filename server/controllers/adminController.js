@@ -28,7 +28,7 @@ async function adminLogin(req, res, next) {
     res.cookie('adminToken', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -37,7 +37,11 @@ async function adminLogin(req, res, next) {
 }
 
 function adminLogout(req, res) {
-  res.clearCookie('adminToken');
+  res.clearCookie('adminToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  });
   res.json({ message: 'Logged out' });
 }
 
@@ -265,6 +269,7 @@ async function listEnquiries(req, res, next) {
     const { rows } = await pool.query(
       `SELECT e.*, c.full_name, c.email,
               (SELECT json_agg(option_value) FROM enquiry_interests WHERE enquiry_id = e.id AND category = 'food_restriction') AS food_restrictions,
+              (SELECT json_agg(option_value) FROM enquiry_interests WHERE enquiry_id = e.id AND category = 'food_cuisine')     AS food_cuisines,
               (SELECT id     FROM trip_proposals WHERE enquiry_id = e.id ORDER BY created_at DESC LIMIT 1) AS proposal_id,
               (SELECT status FROM trip_proposals WHERE enquiry_id = e.id ORDER BY created_at DESC LIMIT 1) AS proposal_status
        FROM enquiries e
@@ -310,6 +315,14 @@ async function updateBooking(req, res, next) {
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json({ booking: rows[0] });
+  } catch (err) { next(err); }
+}
+
+async function deleteBooking(req, res, next) {
+  try {
+    const { rows } = await pool.query('DELETE FROM bookings WHERE id=$1 RETURNING id', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
   } catch (err) { next(err); }
 }
 
@@ -496,6 +509,114 @@ async function convertProposalToBooking(req, res, next) {
   }
 }
 
+// ─── Auto-populate proposal from enquiry interests ────────────────
+
+async function autoPopulateProposal(req, res, next) {
+  const client = await pool.connect();
+  try {
+    const { rows: propRows } = await client.query(
+      `SELECT tp.*, e.duration_days, e.id AS enq_id
+       FROM trip_proposals tp JOIN enquiries e ON e.id = tp.enquiry_id
+       WHERE tp.id = $1`,
+      [req.params.id]
+    );
+    if (!propRows[0]) return res.status(404).json({ error: 'Not found' });
+    const prop = propRows[0];
+
+    const { rows: interests } = await client.query(
+      'SELECT category, option_value FROM enquiry_interests WHERE enquiry_id = $1',
+      [prop.enq_id]
+    );
+
+    const DURATION_MAP = { '3–5 days': 5, '1 week': 7, '2 weeks+': 14 };
+    const numDays = DURATION_MAP[prop.duration_days] || 7;
+
+    const medical       = interests.filter(i => i.category === 'medical');
+    const accommodation = interests.filter(i => i.category === 'accommodation');
+    const transport     = interests.filter(i => i.category === 'transport');
+    const activities    = interests.filter(i => i.category === 'activity');
+
+    const toCreate = [];
+
+    // Medical interests → Day 2 (day after arrival)
+    medical.forEach((i, idx) => {
+      toCreate.push({ day_number: Math.min(2, numDays), item_type: 'medical',       title: i.option_value,               sort_order: idx });
+    });
+
+    // Accommodation → every day from Day 1
+    accommodation.forEach(i => {
+      for (let d = 1; d <= numDays; d++) {
+        toCreate.push({ day_number: d, item_type: 'accommodation', title: i.option_value, sort_order: 1 });
+      }
+    });
+
+    // Transport
+    transport.forEach(i => {
+      const v = i.option_value;
+      if (v === 'Airport Transfer') {
+        toCreate.push({ day_number: 1,       item_type: 'transport', title: 'Airport Transfer (Arrival)',   sort_order: 0 });
+        toCreate.push({ day_number: numDays, item_type: 'transport', title: 'Airport Transfer (Departure)', sort_order: 99 });
+      } else if (v === 'Hospital Transfers') {
+        toCreate.push({ day_number: Math.min(2, numDays), item_type: 'transport', title: 'Hospital Transfer', sort_order: medical.length + 1 });
+      } else if (v === 'Daily Transport') {
+        for (let d = 1; d <= numDays; d++) {
+          toCreate.push({ day_number: d, item_type: 'transport', title: 'Daily Transport', sort_order: 2 });
+        }
+      }
+    });
+
+    // Activities → spread from Day 3 (or Day 2 if no medical)
+    const actStart = medical.length > 0 ? 3 : 2;
+    activities.forEach((i, idx) => {
+      toCreate.push({ day_number: Math.min(actStart + idx, numDays), item_type: 'activity', title: i.option_value, sort_order: 10 + idx });
+    });
+
+    if (toCreate.length === 0) return res.json({ items: [] });
+
+    await client.query('BEGIN');
+    const created = [];
+    for (const item of toCreate) {
+      const { rows } = await client.query(
+        `INSERT INTO proposal_items (proposal_id, day_number, item_type, title, sort_order)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [req.params.id, item.day_number, item.item_type, item.title, item.sort_order]
+      );
+      created.push(rows[0]);
+    }
+    await client.query('COMMIT');
+    res.json({ items: created });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Batch reorder proposal items (DnD) ───────────────────────────
+
+async function reorderProposalItems(req, res, next) {
+  const client = await pool.connect();
+  try {
+    const { items } = req.body; // [{ id, day_number, sort_order }]
+    if (!Array.isArray(items) || items.length === 0) return res.json({ ok: true });
+    await client.query('BEGIN');
+    for (const { id, day_number, sort_order } of items) {
+      await client.query(
+        'UPDATE proposal_items SET day_number=$1, sort_order=$2 WHERE id=$3 AND proposal_id=$4',
+        [day_number, sort_order ?? 0, id, req.params.id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   adminLogin, adminLogout, adminMe,
   listServices, createService, updateService, deleteService,
@@ -506,6 +627,7 @@ module.exports = {
   listEnquiries, updateEnquiry,
   listProposals, createProposal, getProposal, updateProposal,
   addProposalItem, updateProposalItem, deleteProposalItem, convertProposalToBooking,
-  listBookings, updateBooking,
+  autoPopulateProposal, reorderProposalItems,
+  listBookings, updateBooking, deleteBooking,
   listAdminUsers, createAdminUser, updateAdminUser,
 };
