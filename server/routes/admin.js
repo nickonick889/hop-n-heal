@@ -48,6 +48,7 @@ router.put('/enquiries/:id', guard, adminController.updateEnquiry);
 // Proposals
 router.get('/proposals',                        guard, adminController.listProposals);
 router.post('/proposals',                       guard, adminController.createProposal);
+router.delete('/proposals/:id',                 guard, adminController.deleteProposal);
 router.get('/proposals/:id',                    guard, adminController.getProposal);
 router.put('/proposals/:id',                    guard, adminController.updateProposal);
 router.post('/proposals/:id/items',             guard, adminController.addProposalItem);

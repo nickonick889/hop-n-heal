@@ -593,6 +593,14 @@ async function autoPopulateProposal(req, res, next) {
   }
 }
 
+async function deleteProposal(req, res, next) {
+  try {
+    const { rows } = await pool.query('DELETE FROM trip_proposals WHERE id=$1 RETURNING id', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 // ─── Batch reorder proposal items (DnD) ───────────────────────────
 
 async function reorderProposalItems(req, res, next) {
@@ -625,7 +633,7 @@ module.exports = {
   listActivities, createActivity, updateActivity, deleteActivity,
   listPartners, createPartner, updatePartner, deletePartner,
   listEnquiries, updateEnquiry,
-  listProposals, createProposal, getProposal, updateProposal,
+  listProposals, createProposal, getProposal, updateProposal, deleteProposal,
   addProposalItem, updateProposalItem, deleteProposalItem, convertProposalToBooking,
   autoPopulateProposal, reorderProposalItems,
   listBookings, updateBooking, deleteBooking,

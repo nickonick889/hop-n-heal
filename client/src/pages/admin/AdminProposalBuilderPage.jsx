@@ -151,6 +151,7 @@ export default function AdminProposalBuilderPage() {
   const [modal,      setModal]      = useState(null);
   const [itemForm,   setItemForm]   = useState({ item_type: 'medical', title: '', description: '', price: '', day_number: 1 });
   const [itemSaving, setItemSaving] = useState(false);
+  const [fillPrompt, setFillPrompt] = useState(null); // saved item to offer fill-all-days
 
   // ─── Fetch + auto-populate if empty ───────────────────────────
 
@@ -296,6 +297,10 @@ export default function AdminProposalBuilderPage() {
       if (modal.mode === 'add') {
         const { data } = await api.post(`/api/admin/proposals/${id}/items`, payload);
         setItems(prev => [...prev, data.item]);
+        // Offer to fill remaining days for accommodation or transport
+        if (payload.item_type === 'accommodation' || payload.item_type === 'transport') {
+          setFillPrompt(data.item);
+        }
       } else {
         const { data } = await api.put(`/api/admin/proposals/${id}/items/${modal.item.id}`, payload);
         setItems(prev => prev.map(it => it.id === data.item.id ? data.item : it));
@@ -304,6 +309,26 @@ export default function AdminProposalBuilderPage() {
     } finally {
       setItemSaving(false);
     }
+  };
+
+  const handleFillAllDays = async () => {
+    if (!fillPrompt) return;
+    const sourceDays = new Set(itemsRef.current.filter(it => it.title === fillPrompt.title).map(it => it.day_number));
+    const daysToFill = Array.from({ length: numDays }, (_, i) => i + 1).filter(d => !sourceDays.has(d));
+    const newItems = [...itemsRef.current];
+    for (const day of daysToFill) {
+      const { data } = await api.post(`/api/admin/proposals/${id}/items`, {
+        item_type:   fillPrompt.item_type,
+        title:       fillPrompt.title,
+        description: fillPrompt.description || '',
+        price:       fillPrompt.price,
+        day_number:  day,
+      });
+      newItems.push(data.item);
+    }
+    itemsRef.current = newItems;
+    setItems([...newItems]);
+    setFillPrompt(null);
   };
 
   const handleItemDelete = async (itemId) => {
@@ -388,6 +413,19 @@ export default function AdminProposalBuilderPage() {
           </div>
         )}
       </div>
+
+      {/* ─── Fill-all-days prompt ─── */}
+      {fillPrompt && (
+        <div className="mb-4 flex items-center justify-between gap-4 px-5 py-3 bg-accent/10 border border-accent/30 rounded-xl text-sm">
+          <p className="text-text">
+            Add <span className="font-medium">{fillPrompt.title}</span> to all {numDays} days?
+          </p>
+          <div className="flex gap-3 shrink-0">
+            <button onClick={handleFillAllDays} className="text-accent font-medium hover:underline">Yes, fill all</button>
+            <button onClick={() => setFillPrompt(null)} className="text-muted hover:text-text">Dismiss</button>
+          </div>
+        </div>
+      )}
 
       {/* ─── Day-by-day itinerary ─── */}
       <DndContext

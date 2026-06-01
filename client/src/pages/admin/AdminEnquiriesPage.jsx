@@ -107,19 +107,13 @@ export default function AdminEnquiriesPage() {
                   </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      {e.proposal_id ? (
-                        <button onClick={() => navigate(`/admin/proposals/${e.proposal_id}`)} className="text-xs text-accent hover:underline">
-                          View Proposal
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => buildProposal(e.id)}
-                          disabled={buildingFor === e.id}
-                          className="text-xs text-muted hover:text-accent transition-colors disabled:opacity-50"
-                        >
-                          {buildingFor === e.id ? 'Creating…' : 'Build Proposal'}
-                        </button>
-                      )}
+                      <button
+                        onClick={() => buildProposal(e.id)}
+                        disabled={buildingFor === e.id}
+                        className="text-xs text-muted hover:text-accent transition-colors disabled:opacity-50"
+                      >
+                        {buildingFor === e.id ? 'Opening…' : 'Build Proposal'}
+                      </button>
                       <button onClick={() => openEdit(e)} className="text-xs text-accent hover:underline">Update</button>
                     </div>
                   </td>
