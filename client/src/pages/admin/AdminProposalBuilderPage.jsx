@@ -70,8 +70,9 @@ function ItemGhost({ item }) {
 }
 
 // Each draggable item row
-function SortableRow({ item, onEdit, onDelete }) {
+function SortableRow({ item, onEdit, onDelete, onFillAllDays }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const canFill = item.item_type === 'accommodation' || item.item_type === 'transport';
   return (
     <div
       ref={setNodeRef}
@@ -92,7 +93,13 @@ function SortableRow({ item, onEdit, onDelete }) {
       {item.price != null && (
         <span className="text-sm font-medium text-accent shrink-0">SGD {Number(item.price).toLocaleString()}</span>
       )}
-      <div className="flex gap-1 shrink-0">
+      <div className="flex items-center gap-1 shrink-0">
+        {canFill && (
+          <button onClick={() => onFillAllDays(item)}
+            className="text-xs text-accent/70 hover:text-accent px-2 py-1 rounded-lg hover:bg-accent/10 transition-colors whitespace-nowrap">
+            Fill all days
+          </button>
+        )}
         <button onClick={() => onEdit(item)} className="p-1.5 text-muted hover:text-text transition-colors rounded-lg hover:bg-surface-alt">
           <Pencil size={13} />
         </button>
@@ -151,7 +158,6 @@ export default function AdminProposalBuilderPage() {
   const [modal,      setModal]      = useState(null);
   const [itemForm,   setItemForm]   = useState({ item_type: 'medical', title: '', description: '', price: '', day_number: 1 });
   const [itemSaving, setItemSaving] = useState(false);
-  const [fillPrompt, setFillPrompt] = useState(null); // saved item to offer fill-all-days
 
   // ─── Fetch + auto-populate if empty ───────────────────────────
 
@@ -297,10 +303,6 @@ export default function AdminProposalBuilderPage() {
       if (modal.mode === 'add') {
         const { data } = await api.post(`/api/admin/proposals/${id}/items`, payload);
         setItems(prev => [...prev, data.item]);
-        // Offer to fill remaining days for accommodation or transport
-        if (payload.item_type === 'accommodation' || payload.item_type === 'transport') {
-          setFillPrompt(data.item);
-        }
       } else {
         const { data } = await api.put(`/api/admin/proposals/${id}/items/${modal.item.id}`, payload);
         setItems(prev => prev.map(it => it.id === data.item.id ? data.item : it));
@@ -311,24 +313,23 @@ export default function AdminProposalBuilderPage() {
     }
   };
 
-  const handleFillAllDays = async () => {
-    if (!fillPrompt) return;
-    const sourceDays = new Set(itemsRef.current.filter(it => it.title === fillPrompt.title).map(it => it.day_number));
+  const handleFillAllDays = async (sourceItem) => {
+    const sourceDays = new Set(itemsRef.current.filter(it => it.title === sourceItem.title).map(it => it.day_number));
     const daysToFill = Array.from({ length: numDays }, (_, i) => i + 1).filter(d => !sourceDays.has(d));
+    if (daysToFill.length === 0) return;
     const newItems = [...itemsRef.current];
     for (const day of daysToFill) {
       const { data } = await api.post(`/api/admin/proposals/${id}/items`, {
-        item_type:   fillPrompt.item_type,
-        title:       fillPrompt.title,
-        description: fillPrompt.description || '',
-        price:       fillPrompt.price,
+        item_type:   sourceItem.item_type,
+        title:       sourceItem.title,
+        description: sourceItem.description || '',
+        price:       sourceItem.price,
         day_number:  day,
       });
       newItems.push(data.item);
     }
     itemsRef.current = newItems;
     setItems([...newItems]);
-    setFillPrompt(null);
   };
 
   const handleItemDelete = async (itemId) => {
@@ -414,19 +415,6 @@ export default function AdminProposalBuilderPage() {
         )}
       </div>
 
-      {/* ─── Fill-all-days prompt ─── */}
-      {fillPrompt && (
-        <div className="mb-4 flex items-center justify-between gap-4 px-5 py-3 bg-accent/10 border border-accent/30 rounded-xl text-sm">
-          <p className="text-text">
-            Add <span className="font-medium">{fillPrompt.title}</span> to all {numDays} days?
-          </p>
-          <div className="flex gap-3 shrink-0">
-            <button onClick={handleFillAllDays} className="text-accent font-medium hover:underline">Yes, fill all</button>
-            <button onClick={() => setFillPrompt(null)} className="text-muted hover:text-text">Dismiss</button>
-          </div>
-        </div>
-      )}
-
       {/* ─── Day-by-day itinerary ─── */}
       <DndContext
         sensors={sensors}
@@ -450,7 +438,7 @@ export default function AdminProposalBuilderPage() {
                 <SortableContext items={dayItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
                   <DroppableDay dayId={dayId} isEmpty={dayItems.length === 0}>
                     {dayItems.map(item => (
-                      <SortableRow key={item.id} item={item} onEdit={openEdit} onDelete={handleItemDelete} />
+                      <SortableRow key={item.id} item={item} onEdit={openEdit} onDelete={handleItemDelete} onFillAllDays={handleFillAllDays} />
                     ))}
                   </DroppableDay>
                 </SortableContext>
