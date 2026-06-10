@@ -26,7 +26,7 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await signup(form);
-      navigate('/dashboard');
+      window.location.href = '/dashboard';
     } catch (err) {
       setError(err.response?.data?.error || 'Sign up failed. Please try again.');
     } finally {

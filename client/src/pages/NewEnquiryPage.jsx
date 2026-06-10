@@ -230,7 +230,8 @@ export default function NewEnquiryPage() {
         interests:     buildInterests(),
       });
       updateUser(data.user);
-      navigate(`/enquiries/${data.enquiry.id}`);
+      // Full reload so AuthContext re-reads the new cookie before entering the protected route
+      window.location.href = `/enquiries/${data.enquiry.id}`;
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to submit. Please try again.');
     } finally {
